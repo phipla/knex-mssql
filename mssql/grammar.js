@@ -6,6 +6,14 @@ var _           = require('lodash');
 var Helpers     = req('knex/lib/helpers').Helpers;
 var baseGrammar = req('knex/clients/base/grammar').baseGrammar;
 
+// The list of different components
+var components = [
+  'columns', 'aggregates', 'from',
+  'joins', 'wheres', 'groups', 'havings',
+  'orders', 'offset', 'unions'
+];
+
+
 // Extends the standard sql grammar.
 exports.grammar = _.defaults({
 
@@ -28,6 +36,41 @@ exports.grammar = _.defaults({
 
     return response;
   },
+
+  compileSelect: function(qb) {
+    var sql = [];
+
+    if (_.isEmpty(qb.columns) && _.isEmpty(qb.aggregates)) qb.columns = ['*'];
+    for (var i = 0, l = components.length; i < l; i++) {
+      var component = components[i];
+      var result = _.result(qb, component);
+      if (result != null) {
+        sql.push(this['compile' + Helpers.capitalize(component)](qb, result));
+      }
+    }
+    // If there is a transaction, and we have either `forUpdate` or `forShare` specified,
+    // call the appropriate additions to the select statement.
+    if (qb.transaction && qb.flags.selectMode) {
+      sql.push(this['compile' + qb.flags.selectMode](qb));
+    }
+    return _.compact(sql).join(' ');
+  },
+
+  // Compiles the columns in the query, specifying if an item was distinct.
+  compileColumns: function(qb, columns) {
+    var columnsIsArray = _.isArray(columns);
+    var columnsEmpty = _.isEmpty(columns);
+    var limit = _.result(qb, 'limit');
+
+    var sql = 'select ' + 
+      (limit != null ? 'top ' + limit : '') +
+      (qb.flags.distinct ? ' distinct' : '') + 
+      ((columnsIsArray && columnsEmpty) ? '' : ' '+this.columnize(columns));
+
+    sql = qb.aggregates.length && !columnsEmpty ? sql + ',' : sql;
+    return sql;
+  },
+
 
   // Compiles a `delete` query.
   // Adds 'output @@ROWCOUNT' to return the number of affected rows
